@@ -23,6 +23,7 @@ class AlignmentMetrics:
         "cknna",
         "svcca",
         "edit_distance_knn",
+        "anchor_and_similarity",
     ]
 
     @staticmethod
@@ -34,7 +35,45 @@ class AlignmentMetrics:
 
         return getattr(AlignmentMetrics, metric)(*args, **kwargs)
 
+    @staticmethod
+    def anchor_and_similarity(x_feats, y_feats, anchor_ratio=0.1, similarity_metric="cosine", topk=10):
+        """
+        Combines anchor selection and similarity computation into one function.
+        
+        Args:
+            x_feats: A torch tensor of shape N x L x D (language model features)
+            y_feats: A torch tensor of shape N x L x D (vision model features)
+            anchor_ratio: The ratio of the total data to be selected as anchors
+            similarity_metric: The similarity metric to be used ("cosine", "euclidean", etc.)
+            topk: Number of nearest neighbors for KNN
+        
+        Returns:
+            score: The alignment score based on the anchor selection and similarity computation
+        """
+        
+        # Anchor selection: randomly select a subset of points from x_feats
+        num_samples = x_feats.shape[0]
+        num_anchors = int(num_samples * anchor_ratio)
+        anchor_indices = torch.randperm(num_samples)[:num_anchors]
+        x_anchors = x_feats[anchor_indices]
+        y_anchors = y_feats[anchor_indices]
 
+        # Normalize the features if needed (useful for cosine similarity)
+        if similarity_metric == "cosine":
+            x_feats = F.normalize(x_feats, p=2, dim=-1)
+            y_feats = F.normalize(y_feats, p=2, dim=-1)
+            x_anchors = F.normalize(x_anchors, p=2, dim=-1)
+            y_anchors = F.normalize(y_anchors, p=2, dim=-1)
+        
+        # Compute similarities between x_feats and the x_anchors, and y_feats and the y_anchors
+        x_similarities = torch.mm(x_feats, x_anchors.t())  # Similarity matrix for language features
+        y_similarities = torch.mm(y_feats, y_anchors.t())  # Similarity matrix for vision features
+
+        # KNN alignment: Use the nearest neighbors in both similarity spaces
+        score = AlignmentMetrics.cycle_knn(x_similarities, y_similarities, topk=topk)
+        
+        return score
+        
     @staticmethod
     def cycle_knn(feats_A, feats_B, topk):
         """
