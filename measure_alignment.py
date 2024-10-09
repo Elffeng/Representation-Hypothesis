@@ -28,42 +28,89 @@ def prepare_features(feats, q=0.95, exact=False):
     # return feats.cuda()
 
 
+def compute_score(x_feats, y_feats, anchor_ratio=0.1, metric="mutual_knn", topk=10, normalize=True):
+        
+        """
+        Computes the alignment score by integrating anchor selection and similarity computation.
+        
+        Args:
+            x_feats: A torch tensor of shape N x L x D (language model features)
+            y_feats: A torch tensor of shape N x L x D (vision model features)
+            anchor_ratio: The ratio of the total data to be selected as anchors
+            metric: The metric to compute the alignment score ("mutual_knn", "cosine", etc.)
+            topk: Number of nearest neighbors for KNN
+            normalize: Whether to normalize the features before similarity computation
+        
+        Returns:
+            best_alignment_score: The best alignment score
+            best_alignment_indices: The indices of the best alignment
+        """
+        best_alignment_indices = None
+        best_alignment_score = 0
 
-def compute_score(x_feats, y_feats, metric="mutual_knn", topk=10, normalize=True):
-    """
-    Uses different layer combinations of x_feats and y_feats to find the best alignment
-    Args:
-        x_feats: a torch tensor of shape N x L x D
-        y_feats: a torch tensor of shape N x L x D
-    Returns:
-        best_alignment_score: the best alignment score
-        best_alignment: the indices of the best alignment
-        计算两个特征集合之间的对齐分数
-    """
-    best_alignment_indices = None
-    best_alignment_score = 0
+        for i in range(-1, x_feats.shape[1]):
+            # Flatten if necessary
+            x = x_feats.flatten(1, 2) if i == -1 else x_feats[:, i, :]
+            for j in range(-1, y_feats.shape[1]):
+                y = y_feats.flatten(1, 2) if j == -1 else y_feats[:, j, :]
 
-    for i in range(-1, x_feats.shape[1]):
-        x = x_feats.flatten(1, 2) if i == -1 else x_feats[:, i, :]
+                # Normalize if required
+                if normalize:
+                    x = F.normalize(x, p=2, dim=-1)
+                    y = F.normalize(y, p=2, dim=-1)
 
-        for j in range(-1, y_feats.shape[1]):
-            y = y_feats.flatten(1, 2) if j == -1 else y_feats[:, j, :]
+                # Call anchor and similarity computation function
+                x_similarities, y_similarities = metrics.AlignmentMetrics.anchor_and_similarity(x, y, anchor_ratio, similarity_metric="cosine", topk=topk)
 
-            kwargs = {}
-            if 'knn' in metric:
-                kwargs['topk'] = topk
-                    
-            if normalize:
-                x = F.normalize(x, p=2, dim=-1)
-                y = F.normalize(y, p=2, dim=-1)
-            
-            score = metrics.AlignmentMetrics.measure(metric, x, y, **kwargs)
+                # Calculate score based on mutual KNN or any other metric
+                if 'knn' in metric:
+                    score = metrics.AlignmentMetrics.cycle_knn(x_similarities, y_similarities, topk=topk)
+                else:
+                    # Other similarity metrics can be added here (cosine, euclidean, etc.)
+                    score = torch.sum(x_similarities * y_similarities)  # Example of cosine similarity score
 
-            if score > best_alignment_score:
-                best_alignment_score = score
-                best_alignment_indices = (i, j)
+                # Update best score if current score is higher
+                if score > best_alignment_score:
+                    best_alignment_score = score
+                    best_alignment_indices = (i, j)
     
-    return best_alignment_score, best_alignment_indices
+        return best_alignment_score, best_alignment_indices
+
+# def compute_score(x_feats, y_feats, metric="mutual_knn", topk=10, normalize=True):
+#     """
+#     Uses different layer combinations of x_feats and y_feats to find the best alignment
+#     Args:
+#         x_feats: a torch tensor of shape N x L x D
+#         y_feats: a torch tensor of shape N x L x D
+#     Returns:
+#         best_alignment_score: the best alignment score
+#         best_alignment: the indices of the best alignment
+#         计算两个特征集合之间的对齐分数
+#     """
+#     best_alignment_indices = None
+#     best_alignment_score = 0
+
+#     for i in range(-1, x_feats.shape[1]):
+#         x = x_feats.flatten(1, 2) if i == -1 else x_feats[:, i, :]
+
+#         for j in range(-1, y_feats.shape[1]):
+#             y = y_feats.flatten(1, 2) if j == -1 else y_feats[:, j, :]
+
+#             kwargs = {}
+#             if 'knn' in metric:
+#                 kwargs['topk'] = topk
+                    
+#             if normalize:
+#                 x = F.normalize(x, p=2, dim=-1)
+#                 y = F.normalize(y, p=2, dim=-1)
+            
+#             score = metrics.AlignmentMetrics.measure(metric, x, y, **kwargs)
+
+#             if score > best_alignment_score:
+#                 best_alignment_score = score
+#                 best_alignment_indices = (i, j)
+    
+#     return best_alignment_score, best_alignment_indices
 
     
 def compute_alignment(x_feat_paths, y_feat_paths, metric, topk, precise=True):
