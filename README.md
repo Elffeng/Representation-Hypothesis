@@ -9,6 +9,8 @@
 ### 1.1 文本模型
 `python extract_features.py --dataset minhuh/prh --subset wit_1024 --modelset val --modality language --pool avg`
 
+> 
+
 ### 1.2 视觉模型
 `python extract_features.py --dataset minhuh/prh --subset wit_1024 --modelset val --modality vision --pool cls`
 

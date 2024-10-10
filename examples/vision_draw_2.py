@@ -16,15 +16,19 @@ import numpy as np
 platonic_metric = platonic.Alignment(
                     dataset="minhuh/prh", # <--- this is the dataset 
                     subset="wit_1024",    # <--- this is the subset
-                    models=["openllama_7b", "llama_65b"], 
+                    # models=["openllama_7b", "llama_65b"],
+                    models=["bloom-560m"],
+                    device='cuda' if torch.cuda.is_available() else 'cpu',
+                    dtype=torch.float32
                     ) # you can also pass in device and dtype as arguments
 
 # load images
 images = platonic_metric.get_data(modality="image")
 
 # your model (e.g. we will use dinov2 as an example)
-model_name = "vit_giant_patch14_dinov2.lvd142m"
-vision_model = timm.create_model(model_name, pretrained=True).cuda().eval()
+# model_name = "vit_giant_patch14_dinov2.lvd142m"
+model_name = "vit_tiny_patch16_224.augreg_in21k"
+vision_model = timm.create_model(model_name, pretrained=True).eval()
 
 transform = create_transform(
     **resolve_data_config(vision_model.pretrained_cfg, model=vision_model)
@@ -35,36 +39,36 @@ return_nodes = [f"blocks.{i}.add_1" for i in range(len(vision_model.blocks))]
 vision_model = create_feature_extractor(vision_model, return_nodes=return_nodes)
 
 lvm_feats = []
-batch_size = 32
+batch_size = 1
 
 
-for i in trange(0, len(images), batch_size):
-    ims = torch.stack([transform(images[j]) for j in range(i,i+batch_size)]).cuda()
+for i in trange(0, len(images), batch_size):  # 容易溢出，比如i+batch大于总数量的时候
+    ims = torch.stack([transform(images[j]) for j in range(i,i+batch_size)])
 
     with torch.no_grad():
         lvm_output = vision_model(ims)
 
     feats = torch.stack([v[:, 0, :] for v in lvm_output.values()]).permute(1, 0, 2)
     lvm_feats.append(feats)
-    
-# compute score 
+
+# compute score
 lvm_feats = torch.cat(lvm_feats)
 score = platonic_metric.score(lvm_feats, metric="mutual_knn", topk=10, normalize=True)
 pprint(score) # it will print the score and the index of the layer the maximal alignment happened
 
 #画figure2
-# align_scores = [0.05, 0.1, 0.15, 0.30, 0.40]
-# align_errors = [0.02, 0.02, 0.02, 0.03, 0.03] #把measure_align的分数结果填到这里 
-# vtab_tasks_solved_labels = ['0-20%', '20-40%', '40-60%', '60-80%', '80-100%']
+align_scores = [0.05, 0.1, 0.15, 0.30, 0.40]
+align_errors = [0.02, 0.02, 0.02, 0.03, 0.03] #把measure_align的分数结果填到这里
+vtab_tasks_solved_labels = ['0-20%', '20-40%', '40-60%', '60-80%', '80-100%']
 
-# # 绘制柱状图，包含误差条
-# plt.figure(figsize=(10,5))
-# colors = ['yellow', 'green', 'lightgreen', 'darkgreen', 'blue']  # 颜色渐变
-# plt.bar(vtab_tasks_solved_labels, align_scores, yerr=align_errors, color=colors, alpha=0.7)
-# plt.xlabel('Percentage of VTAB Tasks Solved (total=19)')
-# plt.ylabel('Intra-bucket Alignment')
-# plt.title('Convergence to General Competence')
-# plt.show()
+# 绘制柱状图，包含误差条
+plt.figure(figsize=(10,5))
+colors = ['yellow', 'green', 'lightgreen', 'darkgreen', 'blue']  # 颜色渐变
+plt.bar(vtab_tasks_solved_labels, align_scores, yerr=align_errors, color=colors, alpha=0.7)
+plt.xlabel('Percentage of VTAB Tasks Solved (total=19)')
+plt.ylabel('Intra-bucket Alignment')
+plt.title('Convergence to General Competence')
+plt.show()
 
 # # 2. 右图：UMAP 可视化
 # high_dim_feats = np.random.rand(5, 128)  # 5个模型的128维特征

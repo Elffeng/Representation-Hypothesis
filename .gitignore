@@ -4,3 +4,5 @@ __pycache__/
 .idea
 /results/
 /wit_1024/
+/examples/results/
+/examples/wit_1024/

@@ -24,25 +24,26 @@ class Alignment():
         # loads the features from path if it does not exist it will download
         self.features = {}
         for m in models:
-            feat_path = platonic.SUPPORTED_DATASETS[subset][m]["path"]
-            feat_url = platonic.SUPPORTED_DATASETS[subset][m]["url"]
-            
-            if not os.path.exists(feat_path):
-                print(f"downloading features for {m} in {dataset}/{subset} from {feat_url}")
-                
-                # download and save the features in the feat_path
-                os.makedirs(os.path.dirname(feat_path), exist_ok=True)
-                exit_code = os.system(f"wget {feat_url} -O {feat_path}")
-                if exit_code != 0:
-                    raise ValueError(f"Failed to download features for {m} in {dataset}/{subset}")
-
-                if not os.path.exists(feat_path):            
-                    raise ValueError(f"feature path {feat_path} does not exist for {m} in {dataset}/{subset}")
-
+            # feat_path = platonic.SUPPORTED_DATASETS[subset][m]["path"]
+            # feat_url = platonic.SUPPORTED_DATASETS[subset][m]["url"]
+            #
+            # if not os.path.exists(feat_path):
+            #     print(f"downloading features for {m} in {dataset}/{subset} from {feat_url}")
+            #
+            #     # download and save the features in the feat_path
+            #     os.makedirs(os.path.dirname(feat_path), exist_ok=True)
+            #     exit_code = os.system(f"wget {feat_url} -O {feat_path}")
+            #     if exit_code != 0:
+            #         raise ValueError(f"Failed to download features for {m} in {dataset}/{subset}")
+            #
+            #     if not os.path.exists(feat_path):
+            #         raise ValueError(f"feature path {feat_path} does not exist for {m} in {dataset}/{subset}")
+            feat_path = "D:\phd6\parttime/representation convergence\Representation-Hypothesis/results/features\minhuh\prh\wit_1024/bigscience_bloomz-560m_pool-avg.pt"
             self.features[m] = self.load_features(feat_path)
             
         # download dataset from huggingface        
-        self.dataset = load_dataset(dataset, revision=subset, split='train')
+        self.dataset = load_dataset(dataset, revision=subset, split='train', cache_dir='./wit_1024')
+        self.dataset = self.dataset.select(range(12))
         return
     
 
@@ -78,12 +79,13 @@ class Alignment():
         scores = {}
         for m in self.models:
             scores[m] = compute_score(
-                prepare_features(features, exact=True).to(device=self.device, dtype=self.dtype), 
-                prepare_features(self.features[m], exact=True).to(device=self.device, dtype=self.dtype) ,
-                metric, 
+                prepare_features(features, exact=True).to(device=self.device, dtype=self.dtype),  # lvm的
+                prepare_features(self.features[m], exact=True).to(device=self.device, dtype=self.dtype) , # llm的
+                metric=metric,
                 *args, 
                 **kwargs
             )
-        return scores        
+
+        return scores
     
     

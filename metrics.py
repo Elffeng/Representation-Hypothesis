@@ -11,6 +11,8 @@ except ImportError:
     pymp_available = False
     print("Please install the pymp library using `pip install pymp` to speed up non-batched metrics")
 
+import torch.nn.functional as F
+
 
 class AlignmentMetrics:
 
@@ -52,15 +54,15 @@ class AlignmentMetrics:
         """
         
         # Anchor selection: randomly select a subset of points from x_feats
-        num_samples = x_feats.shape[0]
-        num_anchors = int(num_samples * anchor_ratio)
+        num_samples = x_feats.shape[0]  # 样本数
+        num_anchors = int(num_samples * anchor_ratio)  # figure2不是anchor
         anchor_indices = torch.randperm(num_samples)[:num_anchors]
         x_anchors = x_feats[anchor_indices]
         y_anchors = y_feats[anchor_indices]
 
         # Normalize the features if needed (useful for cosine similarity)
         if similarity_metric == "cosine":
-            x_feats = F.normalize(x_feats, p=2, dim=-1)
+            x_feats = F.normalize(x_feats, p=2, dim=-1)  # normalize过了吧？
             y_feats = F.normalize(y_feats, p=2, dim=-1)
             x_anchors = F.normalize(x_anchors, p=2, dim=-1)
             y_anchors = F.normalize(y_anchors, p=2, dim=-1)

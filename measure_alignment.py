@@ -48,10 +48,10 @@ def compute_score(x_feats, y_feats, anchor_ratio=0.1, metric="mutual_knn", topk=
         best_alignment_indices = None
         best_alignment_score = 0
 
-        for i in range(-1, x_feats.shape[1]):
+        for i in range(-1, x_feats.shape[1]):  # 层
             # Flatten if necessary
-            x = x_feats.flatten(1, 2) if i == -1 else x_feats[:, i, :]
-            for j in range(-1, y_feats.shape[1]):
+            x = x_feats.flatten(1, 2) if i == -1 else x_feats[:, i, :]  # 这一层表征取出来？
+            for j in range(-1, y_feats.shape[1]):  # 层
                 y = y_feats.flatten(1, 2) if j == -1 else y_feats[:, j, :]
 
                 # Normalize if required
@@ -60,11 +60,11 @@ def compute_score(x_feats, y_feats, anchor_ratio=0.1, metric="mutual_knn", topk=
                     y = F.normalize(y, p=2, dim=-1)
 
                 # Call anchor and similarity computation function
-                x_similarities, y_similarities = metrics.AlignmentMetrics.anchor_and_similarity(x, y, anchor_ratio, similarity_metric="cosine", topk=topk)
+                x_similarities, y_similarities = metrics.AlignmentMetrics.anchor_and_similarity(x, y, anchor_ratio, similarity_metric="cosine", topk=topk)  # 返回的是一个score值吧？
 
                 # Calculate score based on mutual KNN or any other metric
                 if 'knn' in metric:
-                    score = metrics.AlignmentMetrics.cycle_knn(x_similarities, y_similarities, topk=topk)
+                    score = metrics.AlignmentMetrics.cycle_knn(x_similarities, y_similarities, topk=topk)  # 和上一行代码函数里的内容重复实现了
                 else:
                     # Other similarity metrics can be added here (cosine, euclidean, etc.)
                     score = torch.sum(x_similarities * y_similarities)  # Example of cosine similarity score

@@ -25,7 +25,7 @@ def extract_llm_features(filenames, dataset, args):
         dataset: huggingface dataset
         args: argparse arguments
     """
-    dataset = dataset.select(range(3))
+    dataset = dataset.select(range(12))
     texts = [str(x['text'][args.caption_idx]) for x in dataset]
 
     for llm_model_name in filenames[::-1]:
@@ -78,7 +78,7 @@ def extract_llm_features(filenames, dataset, args):
                     mask = token_inputs["attention_mask"].unsqueeze(-1).unsqueeze(1)
                     feats = (feats * mask).sum(2) / mask.sum(2)
                 elif args.pool == 'last':
-                    feats = [v[:, -1, :] for v in llm_output["hidden_states"]]
+                    feats = [v[:, -1, :] for v in llm_output["hidden_states"]]  # 每一层最后一个token得
                     feats = torch.stack(feats).permute(1, 0, 2)
                 llm_feats.append(feats.cpu())
         print(f"average loss:\t{torch.stack(losses).mean().item()}")
