@@ -141,7 +141,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--modelset",       type=str, default="val", choices=["val", "test"])
     parser.add_argument("--metric",         type=str, default="mutual_knn", choices=metrics.AlignmentMetrics.SUPPORTED_METRICS)
-    parser.add_argument("--topk",           type=int, default=10)
+    parser.add_argument("--topk",           type=int, default=1)
 
     parser.add_argument("--input_dir",      type=str, default="./results/features")
     parser.add_argument("--output_dir",     type=str, default="./results/alignment")
@@ -151,10 +151,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     if not args.precise:
-        # torch.set_float32_matmul_precision('high')
-        # torch.backends.cuda.matmul.allow_tf32 = True
-        # torch.backends.cudnn.allow_tf32 = True
-        # torch.backends.cudnn.benchmark = True
         torch.set_float32_matmul_precision('high')
         torch.backends.cudnn.allow_tf32 = True
         torch.backends.cudnn.benchmark = True
