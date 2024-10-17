@@ -3,7 +3,6 @@ import os
 import argparse
 
 from tqdm import trange
-
 import torch
 
 import timm
@@ -14,8 +13,8 @@ from torchvision.models.feature_extraction import create_feature_extractor
 from datasets import load_dataset
 from tasks import get_models
 from models import load_llm, load_tokenizer
-import utils
-
+import utils 
+    
 
 def extract_llm_features(filenames, dataset, args):
     """
@@ -27,31 +26,31 @@ def extract_llm_features(filenames, dataset, args):
     """
     dataset = dataset.select(range(12))
     texts = [str(x['text'][args.caption_idx]) for x in dataset]
-
+        
     for llm_model_name in filenames[::-1]:
         save_path = utils.to_feature_filename(
             args.output_dir, args.dataset, args.subset, llm_model_name,
             pool=args.pool, prompt=args.prompt, caption_idx=args.caption_idx,
         )
-
+        
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         print(f"\ndataset: \t{args.dataset}")
         print(f"subset:    \t{args.subset}")
         print(f"processing:\t{llm_model_name}")
         print(f'save_path: \t{save_path}')
-
+        
         if os.path.exists(save_path) and not args.force_remake:
             print("file exists. skipping")
             continue
-        # CPU
-        # device = torch.device("cpu")
+        #CPU
+        device = torch.to(device)
         language_model = load_llm(llm_model_name, qlora=args.qlora, force_download=args.force_download)
-        # language_model = language_model.to(device)
+        language_model = language_model.to(device)
         # language_model = load_llm(llm_model_name, qlora=args.qlora, force_download=args.force_download)
         llm_param_count = sum([p.numel() for p in language_model.parameters()])
         tokenizer = load_tokenizer(llm_model_name)
-
-        tokens = tokenizer(texts, padding="longest", return_tensors="pt")
+    
+        tokens = tokenizer(texts, padding="longest", return_tensors="pt")        
         llm_feats, losses, bpb_losses = [], [], []
 
         # hack to get around HF mapping data incorrectly when using model-parallel
@@ -59,7 +58,7 @@ def extract_llm_features(filenames, dataset, args):
 
         for i in trange(0, len(dataset), args.batch_size):
             # get embedding cuda device
-            token_inputs = {k: v[i:i + args.batch_size].to(device).long() for (k, v) in tokens.items()}
+            token_inputs = {k: v[i:i+args.batch_size].to(device).long() for (k, v) in tokens.items()}
 
             with torch.no_grad():
                 llm_output = language_model(
@@ -68,37 +67,41 @@ def extract_llm_features(filenames, dataset, args):
                 )
 
                 loss, avg_loss = utils.cross_entropy_loss(token_inputs, llm_output)
-                losses.extend(avg_loss.cpu())
+                losses.extend(avg_loss.to(device))
 
-                bpb = utils.cross_entropy_to_bits_per_unit(loss.cpu(), texts[i:i + args.batch_size], unit="byte")
+                bpb = utils.cross_entropy_to_bits_per_unit(loss.to(device), texts[i:i+args.batch_size], unit="byte")
                 bpb_losses.extend(bpb)
-
+                
                 if args.pool == 'avg':
-                    feats = torch.stack(llm_output["hidden_states"]).permute(1, 0, 2, 3)
-                    mask = token_inputs["attention_mask"].unsqueeze(-1).unsqueeze(1)
-                    feats = (feats * mask).sum(2) / mask.sum(2)
+                    hidden_states = torch.stack(llm_output["hidden_states"])  # (num_layers, batch_size, seq_len, hidden_dim)
+                    mask = token_inputs["attention_mask"].unsqueeze(-1).unsqueeze(1)  # (batch_size, 1, seq_len, 1)
+                    masked_hidden_states = hidden_states * mask
+                    avg_feats = masked_hidden_states.sum(dim=2) / mask.sum(dim=2)
+                    avg_feats = avg_feats.mean(dim=0)
+                    
                 elif args.pool == 'last':
-                    feats = [v[:, -1, :] for v in llm_output["hidden_states"]]  # 每一层最后一个token得
+                    feats = [v[:, -1, :] for v in llm_output["hidden_states"]]
                     feats = torch.stack(feats).permute(1, 0, 2)
-                llm_feats.append(feats.cpu())
+                llm_feats.append(feats.to(device))
+
         print(f"average loss:\t{torch.stack(losses).mean().item()}")
         save_dict = {
-            "feats": torch.cat(llm_feats).cpu(),
+            "feats": torch.cat(llm_feats).to(device),
             "num_params": llm_param_count,
-            "mask": tokens["attention_mask"].cpu(),
+            "mask": tokens["attention_mask"].to(device),
             "loss": torch.stack(losses).mean(),
             "bpb": torch.stack(bpb_losses).mean(),
         }
 
         torch.save(save_dict, save_path)
-        # 在每次循环结束后，手动清理 CUDA 缓存并调用垃圾回收。
+#在每次循环结束后，手动清理 CUDA 缓存并调用垃圾回收。
         del language_model, tokenizer, llm_feats, llm_output
         # torch.cuda.empty_cache()
         # torch.cuda.ipc_collect()
         gc.collect()
     return
-
-
+    
+        
 def extract_lvm_features(filenames, dataset, args):
     """
     Extracts features from vision models.
@@ -108,16 +111,16 @@ def extract_lvm_features(filenames, dataset, args):
         args: argparse arguments
     """
     assert args.pool == 'cls', "pooling is not supported for lvm features"
-    dataset = dataset.select(range(3))
+    
     for lvm_model_name in filenames:
         assert 'vit' in lvm_model_name, "only vision transformers are supported"
-
+        
         save_path = utils.to_feature_filename(
             args.output_dir, args.dataset, args.subset, lvm_model_name,
             pool=args.pool, prompt=None, caption_idx=None,
         )
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
-
+        
         print(f"\ndataset: \t{args.dataset}")
         print(f"subset:    \t{args.subset}")
         print(f"processing:\t{lvm_model_name}")
@@ -126,11 +129,11 @@ def extract_lvm_features(filenames, dataset, args):
         if os.path.exists(save_path) and not args.force_remake:
             print("file exists. skipping")
             continue
-        # CPU
-        # device = torch.device("cpu")
-        # vision_model = timm.create_model(lvm_model_name, pretrained=True).cuda().eval()
+        #CPU
+        device = torch.to(device)
+        #vision_model = timm.create_model(lvm_model_name, pretrained=True).cuda().eval()
         vision_model = timm.create_model(lvm_model_name, pretrained=True).eval()
-        vision_model = vision_model.to(args.device)
+        vision_model = vision_model.to(device)
         lvm_param_count = sum([p.numel() for p in vision_model.parameters()])
 
         transform = create_transform(
@@ -147,14 +150,14 @@ def extract_lvm_features(filenames, dataset, args):
 
         for i in trange(0, len(dataset), args.batch_size):
             with torch.no_grad():
-                ims = torch.stack([transform(dataset[j]['image']) for j in range(i, i + args.batch_size)]).to(device)
+                ims = torch.stack([transform(dataset[j]['image']) for j in range(i, i+args.batch_size)]).to(device)
                 lvm_output = vision_model(ims)
 
                 if args.pool == "cls":
                     feats = [v[:, 0, :] for v in lvm_output.values()]
                     feats = torch.stack(feats).permute(1, 0, 2)
-
-                lvm_feats.append(feats.cpu())
+                    
+                lvm_feats.append(feats.to(device))
 
         torch.save({"feats": torch.cat(lvm_feats), "num_params": lvm_param_count}, save_path)
 
@@ -164,40 +167,41 @@ def extract_lvm_features(filenames, dataset, args):
         gc.collect()
 
 
-if __name__ == "__main__":
 
+if __name__ == "__main__":
+    
     parser = argparse.ArgumentParser()
     parser.add_argument("--force_download", action="store_true")
-    parser.add_argument("--force_remake", action="store_true")
-    parser.add_argument("--num_samples", type=int, default=1024)
-    parser.add_argument("--batch_size", type=int, default=1)
-    parser.add_argument("--pool", type=str, default='avg', choices=['avg', 'cls'])
-    parser.add_argument("--prompt", action="store_true")
-    parser.add_argument("--dataset", type=str, default="prh")
-    parser.add_argument("--subset", type=str, default="wit_1024")
-    parser.add_argument("--caption_idx", type=int, default=0)
-    parser.add_argument("--modelset", type=str, default="val", choices=["val", "test"])
-    parser.add_argument("--modality", type=str, default="all", choices=["vision", "language", "all"])
-    parser.add_argument("--output_dir", type=str, default="./results/features")
-    parser.add_argument("--qlora", action="store_true")
+    parser.add_argument("--force_remake",   action="store_true")
+    parser.add_argument("--num_samples",    type=int, default=1024)
+    parser.add_argument("--batch_size",     type=int, default=4)
+    parser.add_argument("--pool",           type=str, default='avg', choices=['avg', 'cls'])
+    parser.add_argument("--prompt",         action="store_true")
+    parser.add_argument("--dataset",        type=str, default="prh")
+    parser.add_argument("--subset",         type=str, default="wit_1024")
+    parser.add_argument("--caption_idx",    type=int, default=0)
+    parser.add_argument("--modelset",       type=str, default="val", choices=["val", "test"])
+    parser.add_argument("--modality",       type=str, default="all", choices=["vision", "language", "all"])
+    parser.add_argument("--output_dir",     type=str, default="/Users/fengdan/Desktop/essay/platonic-rep-main/")
+    parser.add_argument("--qlora",          action="store_true")
     args = parser.parse_args()
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    args.device = device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     if args.qlora:
         print(f"QLoRA is set to True. The alignment score will be slightly off.")
 
     llm_models, lvm_models = get_models(args.modelset, modality=args.modality)
-
+    
     # load dataset once outside    
-    dataset = load_dataset(args.dataset, revision=args.subset, split='train', cache_dir='./wit_1024')
-
-    if args.modality in ["all", "vision"]:
-        # extract all vision model features
-        extract_lvm_features(lvm_models, dataset, args)
+    dataset = load_dataset(args.dataset, revision=args.subset, split='train')
 
     if args.modality in ["all", "language"]:
         # extract all language model features
         extract_llm_features(llm_models, dataset, args)
+    
+    if args.modality in ["all", "vision"]:
+        # extract all vision model features
+        extract_lvm_features(lvm_models, dataset, args)
 
 
 """
