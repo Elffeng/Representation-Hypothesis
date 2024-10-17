@@ -6,87 +6,102 @@ import timm
 from timm.data import resolve_data_config
 from timm.data.transforms_factory import create_transform
 from torchvision.models.feature_extraction import create_feature_extractor
-
 import matplotlib.pyplot as plt
 import umap
 import numpy as np
+import argparse
 
+def extract_lvm_features(vision_model, images, transform, batch_size):
+    lvm_feats = []
+    for i in trange(0, len(images), batch_size):
+        ims = torch.stack([transform(images[j]) for j in range(i, i + batch_size)]).to(device)
 
-# setup platonic metric
-platonic_metric = platonic.Alignment(
-                    dataset="minhuh/prh", # <--- this is the dataset 
-                    subset="wit_1024",    # <--- this is the subset
-                    # models=["openllama_7b", "llama_65b"],
-                    models=["bloom-560m"],
-                    device='cuda' if torch.cuda.is_available() else 'cpu',
-                    dtype=torch.float32
-                    ) # you can also pass in device and dtype as arguments
+        with torch.no_grad():
+            lvm_output = vision_model(ims)
 
-# load images
-images = platonic_metric.get_data(modality="image")
+        feats = torch.stack([v[:, 0, :] for v in lvm_output.values()]).permute(1, 0, 2)
+        lvm_feats.append(feats)
 
-# your model (e.g. we will use dinov2 as an example)
-# model_name = "vit_giant_patch14_dinov2.lvd142m"
-model_name = "vit_tiny_patch16_224.augreg_in21k"
-vision_model = timm.create_model(model_name, pretrained=True).eval()
+    lvm_feats = torch.cat(lvm_feats)
+    return lvm_feats
 
-transform = create_transform(
-    **resolve_data_config(vision_model.pretrained_cfg, model=vision_model)
-)
+def plot_alignment_figure(align_scores, align_errors, vtab_tasks_solved_labels):
+    plt.figure(figsize=(10, 5))
+    colors = ['yellow', 'green', 'lightgreen', 'darkgreen', 'blue']
+    plt.bar(vtab_tasks_solved_labels, align_scores, yerr=align_errors, color=colors, alpha=0.7)
+    plt.xlabel('Percentage of VTAB Tasks Solved (total=19)')
+    plt.ylabel('Intra-bucket Alignment')
+    plt.title('Convergence to General Competence')
+    if save_path:
+        plt.savefig(save_path)
+    else:
+        plt.show()
+    
 
-# extract features
-return_nodes = [f"blocks.{i}.add_1" for i in range(len(vision_model.blocks))]
-vision_model = create_feature_extractor(vision_model, return_nodes=return_nodes)
+def plot_umap_figure(high_dim_feats, model_types, vtab_tasks_solved, markers):
+    umap_reducer = umap.UMAP()
+    umap_embeds = umap_reducer.fit_transform(high_dim_feats)
 
-lvm_feats = []
-batch_size = 1
+    plt.figure(figsize=(8, 6))
+    for i, model_type in enumerate(model_types):
+        plt.scatter(umap_embeds[i, 0], umap_embeds[i, 1], c=[vtab_tasks_solved[i]],
+                    cmap='coolwarm', s=100, alpha=0.8, label=model_type, marker=markers[i])
 
+    plt.colorbar(label='VTAB Tasks Solved')
+    plt.title('UMAP of Model Representations')
+    plt.legend(title="Model Types")
+    if save_path:
+        plt.savefig(save_path)
+    else:
+        plt.show()
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--force_download", action="store_true")
+    parser.add_argument("--force_remake", action="store_true")
+    parser.add_argument("--num_samples", type=int, default=1024)
+    parser.add_argument("--batch_size", type=int, default=1)
+    parser.add_argument("--dataset", type=str, default="minhuh/prh")
+    parser.add_argument("--subset", type=str, default="wit_1024")
+    parser.add_argument("--model_name", type=str, default="results/features/minhuh/prh/wit_1024/vit_tiny_patch16_224.augreg_in21k_pool-cls.pt")
+    parser.add_argument("--output_dir", type=str, default="/Users/fengdan/Desktop/essay/platonic-rep-main/")
+    parser.add_argument("--save_plots", type=str, help="/Users/fengdan/Desktop/essay/platonic-rep-main/", default=None)
 
-for i in trange(0, len(images), batch_size):  # 容易溢出，比如i+batch大于总数量的时候
-    ims = torch.stack([transform(images[j]) for j in range(i,i+batch_size)])
+    args = parser.parse_args()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    with torch.no_grad():
-        lvm_output = vision_model(ims)
+    # Setup platonic metric
+    platonic_metric = platonic.Alignment(
+        dataset=args.dataset,
+        subset=args.subset,
+        models=["openllama_7b", "llama_65b"]
+    )
 
-    feats = torch.stack([v[:, 0, :] for v in lvm_output.values()]).permute(1, 0, 2)
-    lvm_feats.append(feats)
+    # Load images
+    images = platonic_metric.get_data(modality="image")
 
-# compute score
-lvm_feats = torch.cat(lvm_feats)
-score = platonic_metric.score(lvm_feats, metric="mutual_knn", topk=10, normalize=True)
-pprint(score) # it will print the score and the index of the layer the maximal alignment happened
+    # Load vision model
+    vision_model = timm.create_model(args.model_name, pretrained=True).to(device).eval()
 
-#画figure2
-align_scores = [0.05, 0.1, 0.15, 0.30, 0.40]
-align_errors = [0.02, 0.02, 0.02, 0.03, 0.03] #把measure_align的分数结果填到这里
-vtab_tasks_solved_labels = ['0-20%', '20-40%', '40-60%', '60-80%', '80-100%']
+    transform = create_transform(
+        **resolve_data_config(vision_model.pretrained_cfg, model=vision_model)
+    )
 
-# 绘制柱状图，包含误差条
-plt.figure(figsize=(10,5))
-colors = ['yellow', 'green', 'lightgreen', 'darkgreen', 'blue']  # 颜色渐变
-plt.bar(vtab_tasks_solved_labels, align_scores, yerr=align_errors, color=colors, alpha=0.7)
-plt.xlabel('Percentage of VTAB Tasks Solved (total=19)')
-plt.ylabel('Intra-bucket Alignment')
-plt.title('Convergence to General Competence')
-plt.show()
+    return_nodes = [f"blocks.{i}.add_1" for i in range(len(vision_model.blocks))]
+    vision_model = create_feature_extractor(vision_model, return_nodes=return_nodes)
 
-# # 2. 右图：UMAP 可视化
-# high_dim_feats = np.random.rand(5, 128)  # 5个模型的128维特征
-# model_types = ['Classification', 'MAE', 'Random Initialization', 'Contrastive', 'CLIP']  # 示例模型类型
-# markers = ['o', 's', '^', '*', 'D']  # 不同模型类型的标记符号
-# vtab_tasks_solved = [3, 6, 9, 15, 19]  # VTAB任务解决数量
+    lvm_feats = extract_lvm_features(vision_model, images, transform, args.batch_size)
 
-# # UMAP降维
-# umap_reducer = umap.UMAP()
-# umap_embeds = umap_reducer.fit_transform(high_dim_feats)
+    align_scores = platonic_metric.score(lvm_feats, metric="mutual_knn", topk=10, normalize=True)
+    pprint(align_scores)
 
-# # UMAP散点图
-# plt.figure(figsize=(8,6))
-# for i, model_type in enumerate(model_types):
-#     plt.scatter(umap_embeds[i, 0], umap_embeds[i, 1], c=[vtab_tasks_solved[i]], cmap='coolwarm', s=100, alpha=0.8, label=model_type, marker=markers[i])
+    #
+    align_errors = [0.02, 0.02, 0.02, 0.03, 0.03]
+    vtab_tasks_solved_labels = ['0-20%', '20-40%', '40-60%', '60-80%', '80-100%']
+    plot_alignment_figure(align_scores, align_errors, vtab_tasks_solved_labels)
 
-# plt.colorbar(label='VTAB Tasks Solved')
-# plt.title('UMAP of Model Representations')
-# plt.legend(title="Model Types")
-# plt.show()
+    high_dim_feats = np.random.rand(5, 128)
+    model_types = ['Classification', 'MAE', 'Random Initialization', 'Contrastive', 'CLIP']
+    markers = ['o', 's', '^', '*', 'D']
+    vtab_tasks_solved = [3, 6, 9, 15, 19]
+    plot_umap_figure(high_dim_feats, model_types, vtab_tasks_solved, markers)
 
