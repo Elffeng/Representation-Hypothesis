@@ -1,59 +1,47 @@
 import argparse
 
 import numpy as np
+import timm
 import torch
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, BitsAndBytesConfig, AutoTokenizer, AutoConfig
+from torchvision.models.feature_extraction import create_feature_extractor
+from timm.data import resolve_data_config
+from timm.data.transforms_factory import create_transform
 from sklearn.cross_decomposition import CCA
 
 import metrics
 import utils
 
 
-def extract_and_save_llm_rep(args, texts, llm_model, tokenizer,):
+def extract_and_save_lvm_rep(args, images, lvm_model, tokenizer,):
+    if "vit" in args.lvm_model_name:
+        return_nodes = [f"blocks.{i}.add_1" for i in range(len(lvm_model.blocks))]
+    else:
+        raise NotImplementedError(f"unknown model {args.lvm_model_name}")
+    lvm_model = create_feature_extractor(lvm_model, return_nodes=return_nodes)
 
-    llm_feats, losses, bpb_losses = [], [], []
+    lvm_feats = []
 
-    for text in texts:
-        inputs = tokenizer(text, padding="longest", return_tensors="pt")
-        input_ids = inputs["input_ids"]
-        mask = inputs["attention_mask"].unsqueeze(-1).unsqueeze(1)  # (batch_size, 1, seq_len, 1)
+    with torch.no_grad():
+        for image in images:
+            input_tokens = tokenizer(image).unsqueeze(0)
+            lvm_output = lvm_model(input_tokens)
 
-        with torch.no_grad():
-            llm_output = llm_model(input_ids=input_ids,)
-            all_hidden_states = llm_output["hidden_states"] # (num_layers, batch_size, seq_len, hidden_dim)
-            if args.pool == 'avg':
-                feats = torch.stack(all_hidden_states).permute(1, 0, 2, 3)
-                feats = (feats * mask).sum(2) / mask.sum(2)
-            elif args.pool == 'last':
-                feats = [v[:, -1, :] for v in all_hidden_states]
+            if args.pool == "cls":
+                feats = [v[:, 0, :] for v in lvm_output.values()]
                 feats = torch.stack(feats).permute(1, 0, 2)
-            else:
-                raise NotImplementedError(f"unknown pooling {args.pool}")
-            llm_feats.append(feats.cpu())
+            lvm_feats.append(feats)
 
-            # loss, avg_loss = utils.cross_entropy_loss(token_inputs, llm_output)
-            # losses.extend(avg_loss.cpu())
-            #
-            # bpb = utils.cross_entropy_to_bits_per_unit(loss.cpu(), texts[i:i + args.batch_size], unit="byte")
-            # bpb_losses.extend(bpb)
-        # print(f"average loss:\t{torch.stack(losses).mean().item()}")
     save_dict = {
-        "feats": torch.cat(llm_feats),
-        # "num_params": llm_param_count,
-        # "mask": tokens["attention_mask"],
-        # "loss": torch.stack(losses).mean(),
-        # "bpb": torch.stack(bpb_losses).mean(),
+        "feats": torch.cat(lvm_feats),
     }
     save_path = utils.to_feature_filename(
-        args.output_dir, args.dataset, args.subset, args.llm_model_name,
-        pool=args.pool, prompt=args.prompt, caption_idx=args.caption_idx,
+        args.output_dir, args.dataset, args.subset, args.lvm_model_name,
+        pool=args.pool, prompt=None, caption_idx=None,
     )
     torch.save(save_dict, save_path)
-    # del llm_model, tokenizer, llm_feats, llm_output
-    # torch.cuda.empty_cache()
-    # torch.cuda.ipc_collect()
-    # gc.collect()
+
 
 
 
@@ -79,41 +67,15 @@ def auto_determine_dtype():
     return compute_dtype, torch_dtype
 
 
-def load_llm(llm_model_path, qlora=False, force_download=False, from_init=False):
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    device_map = "auto" if device == "cuda" else None
+def load_model(lvm_model_name):
+    vision_model = timm.create_model(lvm_model_name, pretrained=True)
+    lvm_param_count = sum([p.numel() for p in vision_model.parameters()])
 
-    quantization_config = None
-    if qlora:
-        compute_dtype, torch_dtype = auto_determine_dtype()
-        quantization_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            llm_int8_threshold=6.0,
-            llm_int8_has_fp16_weight=False,
-            bnb_4bit_compute_dtype=compute_dtype,
-            bnb_4bit_use_double_quant=True,
-            bnb_4bit_quant_type="nf4",
-        )
+    transform = create_transform(
+        **resolve_data_config(vision_model.pretrained_cfg, model=vision_model)
+    )
 
-    if from_init:
-        config = AutoConfig.from_pretrained(llm_model_path,
-                                            device_map=device_map,
-                                            quantization_config=quantization_config,
-                                            torch_dtype=torch_dtype,
-                                            force_download=force_download,
-                                            output_hidden_states=True, )
-        language_model = AutoModelForCausalLM.from_config(config)
-    else:
-        language_model = AutoModelForCausalLM.from_pretrained(
-            llm_model_path,
-            device_map=device_map,
-            quantization_config=quantization_config,
-            # torch_dtype=torch_dtype,
-            force_download=force_download,
-            output_hidden_states=True,
-        )
-
-    return language_model
+    return vision_model, transform
 
 
 def load_tokenizer(llm_model_name):
@@ -129,21 +91,11 @@ def load_tokenizer(llm_model_name):
     return tokenizer
 
 
-
-
-
-def load_text(args):
+def load_images(args):
     dataset = load_dataset(args.dataset, revision=args.subset, split='train', cache_dir='./wit_1024')
     dataset = dataset.select(range(12))
-    texts = [str(x['text'][args.caption_idx]) for x in dataset]
-    return texts
-
-
-def load_model(args):
-    language_model = load_llm(llm_model_path=args.llm_model_name, qlora=args.qlora, force_download=args.force_download)
-    llm_param_count = sum([p.numel() for p in language_model.parameters()])
-    tokenizer = load_tokenizer(llm_model_name=args.llm_model_name)
-    return language_model, tokenizer
+    images = [x['image'] for x in dataset]
+    return images
 
 
 def load_metrics(args):
@@ -425,14 +377,14 @@ def get_args():
     parser.add_argument("--force_remake", action="store_true")
     parser.add_argument("--num_samples", type=int, default=1024)
     parser.add_argument("--batch_size", type=int, default=4)
-    parser.add_argument("--pool", type=str, default='avg', choices=['avg', 'cls'])
+    parser.add_argument("--pool", type=str, default='cls', choices=['cls'])
     parser.add_argument("--prompt", action="store_true")
     parser.add_argument("--dataset", type=str, default="minhuh/prh")
     parser.add_argument("--subset", type=str, default="wit_1024")
     parser.add_argument("--caption_idx", type=int, default=0)
     parser.add_argument("--modelset", type=str, default="val", choices=["val", "test"])
-    parser.add_argument("--llm_model_name", type=str, default="bigscience/bloomz-560m", choices=["val", "test"])
-    parser.add_argument("--modality", type=str, default="language", choices=["vision", "language", "all"])
+    parser.add_argument("--lvm_model_name", type=str, default="vit_tiny_patch16_224.augreg_in21k", choices=["val", "test"])
+    parser.add_argument("--modality", type=str, default="vision", choices=["vision", "language", "all"])
     parser.add_argument("--output_dir", type=str, default="./results/features")
     parser.add_argument("--qlora", action="store_true")
     args = parser.parse_args()
@@ -444,7 +396,7 @@ def get_args():
 
 if __name__=="__main__":
     args = get_args()
-    texts = load_text(args)
-    llm_model, tokenizer = load_model(args)
-    extract_and_save_llm_rep(args=args, texts=texts, llm_model=llm_model, tokenizer=tokenizer)
-    load_representation("D:\phd6\parttime/representation convergence\Representation-Hypothesis/results/features\minhuh\prh\wit_1024/bigscience_bloomz-560m_pool-avg.pt")
+    images = load_images(args)
+    lvm_model, transform = load_model(args.lvm_model_name)
+    extract_and_save_lvm_rep(args=args, images=images, lvm_model=lvm_model, tokenizer=transform)
+    # load_representation("D:\phd6\parttime/representation convergence\Representation-Hypothesis/results/features\minhuh\prh\wit_1024/bigscience_bloomz-560m_pool-avg.pt")
