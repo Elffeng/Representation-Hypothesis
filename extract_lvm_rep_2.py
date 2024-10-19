@@ -136,4 +136,4 @@ if __name__=="__main__":
     images = load_images(args)
     lvm_model, transform = load_model(args.lvm_model_name)
     extract_and_save_lvm_rep(args=args, images=images, lvm_model=lvm_model, tokenizer=transform)
-    # load_representation("D:\phd6\parttime/representation convergence\Representation-Hypothesis/results/features\minhuh\prh\wit_1024/bigscience_bloomz-560m_pool-avg.pt")
+    # load_representation("./results/features\minhuh\prh\wit_1024/bigscience_bloomz-560m_pool-avg.pt")
