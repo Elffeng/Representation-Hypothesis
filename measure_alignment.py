@@ -170,10 +170,6 @@ def compute_alignment(x_feat_paths, y_feat_paths, metric, topk, precise=True):
 
 
 if __name__ == "__main__":
-    """
-    recommended to use llm as modality_x since it will load each LLM features once
-    """
-    
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset",        type=str, default="prh/minhuh")
     parser.add_argument("--subset",         type=str, default="wit_1024")
@@ -197,25 +193,27 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     
-    if not args.precise:
-        torch.set_float32_matmul_precision('high')
-        torch.backends.cudnn.allow_tf32 = True
-        torch.backends.cudnn.benchmark = True
+    # if not args.precise:
+    #     torch.set_float32_matmul_precision('high')
+    #     torch.backends.cudnn.allow_tf32 = True
+    #     torch.backends.cudnn.benchmark = True
+    #
+    # save_path = utils.to_alignment_filename(
+    #         args.output_dir, args.dataset, args.modelset,
+    #         args.modality_x, args.pool_x, args.prompt_x,
+    #         args.modality_y, args.pool_y, args.prompt_y,
+    #         args.metric, args.topk
+    # )
     
-    save_path = utils.to_alignment_filename(
-            args.output_dir, args.dataset, args.modelset,
-            args.modality_x, args.pool_x, args.prompt_x,
-            args.modality_y, args.pool_y, args.prompt_y,
-            args.metric, args.topk
-    )
+    # if os.path.exists(save_path) and not args.force_remake:
+    #     print(f"alignment already exists at {save_path}")
+    #     exit()
+
+    # 第一步：加载模型对
+    model_left, model_right = get_models(args.model_left, args.model_right)
     
-    if os.path.exists(save_path) and not args.force_remake:
-        print(f"alignment already exists at {save_path}")
-        exit()
-    
-    llm_models, lvm_models = get_models(args.modelset, modality='all')
-    models_x = llm_models if args.modality_x == "language" else lvm_models
-    models_y = llm_models if args.modality_y == "language" else lvm_models
+    # models_x = llm_models if args.modality_x == "language" else lvm_models
+    # models_y = llm_models if args.modality_y == "language" else lvm_models
     
     models_x_paths = [utils.to_feature_filename(args.input_dir, args.dataset, args.subset, m, args.pool_x, args.prompt_x) for m in models_x]
     models_y_paths = [utils.to_feature_filename(args.input_dir, args.dataset, args.subset, m, args.pool_y, args.prompt_y) for m in models_y]

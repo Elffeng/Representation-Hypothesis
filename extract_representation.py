@@ -43,21 +43,14 @@ def extract_llm_features(filenames, dataset, args):
             print("file exists. skipping")
             continue
         #CPU
-        device = torch.to(device)
         language_model = load_llm(llm_model_name, qlora=args.qlora, force_download=args.force_download)
-        language_model = language_model.to(device)
-        # language_model = load_llm(llm_model_name, qlora=args.qlora, force_download=args.force_download)
         llm_param_count = sum([p.numel() for p in language_model.parameters()])
         tokenizer = load_tokenizer(llm_model_name)
     
         tokens = tokenizer(texts, padding="longest", return_tensors="pt")        
         llm_feats, losses, bpb_losses = [], [], []
 
-        # hack to get around HF mapping data incorrectly when using model-parallel
-        # device = next(language_model.parameters()).device
-
         for i in trange(0, len(dataset), args.batch_size):
-            # get embedding cuda device
             token_inputs = {k: v[i:i+args.batch_size].to(device).long() for (k, v) in tokens.items()}
 
             with torch.no_grad():
@@ -94,10 +87,7 @@ def extract_llm_features(filenames, dataset, args):
         }
 
         torch.save(save_dict, save_path)
-#在每次循环结束后，手动清理 CUDA 缓存并调用垃圾回收。
         del language_model, tokenizer, llm_feats, llm_output
-        # torch.cuda.empty_cache()
-        # torch.cuda.ipc_collect()
         gc.collect()
     return
     
@@ -126,12 +116,9 @@ def extract_lvm_features(filenames, dataset, args):
         print(f"processing:\t{lvm_model_name}")
         print(f'save_path: \t{save_path}')
 
-        if os.path.exists(save_path) and not args.force_remake:
-            print("file exists. skipping")
-            continue
-        #CPU
-        device = torch.to(device)
-        #vision_model = timm.create_model(lvm_model_name, pretrained=True).cuda().eval()
+        # if os.path.exists(save_path) and not args.force_remake:
+        #     print("file exists. skipping")
+        #     continue
         vision_model = timm.create_model(lvm_model_name, pretrained=True).eval()
         vision_model = vision_model.to(device)
         lvm_param_count = sum([p.numel() for p in vision_model.parameters()])
@@ -186,6 +173,7 @@ if __name__ == "__main__":
     parser.add_argument("--qlora",          action="store_true")
     args = parser.parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    args.device = device
 
     if args.qlora:
         print(f"QLoRA is set to True. The alignment score will be slightly off.")
