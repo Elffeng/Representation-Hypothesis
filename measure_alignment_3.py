@@ -2,6 +2,8 @@ import argparse
 
 import numpy as np
 import torch
+import umap.umap_ as umap
+from matplotlib import pyplot as plt
 from sklearn.cross_decomposition import CCA
 import torchaudio.functional as TAF
 
@@ -21,6 +23,7 @@ class AlignmentMetrics:
         self.rep_left = rep_left
         self.rep_right = rep_right
         self.topk = topk
+
     def compute_score(self):
         if self.metric == "cycle_knn":
             metric_value = self.cycle_knn(self.rep_left, self.rep_right, self.topk)
@@ -333,8 +336,36 @@ def compute_alignment(x_feat_paths, y_feat_paths, metric, topk, precise=True):
 
 
 def plot():
-    pass
+    align_scores = [0.1, 0.3, 0.5, 0.6, 0.8]
+    align_errors = [0.02, 0.02, 0.02, 0.03, 0.03]
+    vtab_tasks_solved_labels = ['0-20%', '20-40%', '40-60%', '60-80%', '80-100%']
+    # plot_alignment_figure(align_scores, align_errors, vtab_tasks_solved_labels)
 
+    plt.figure(figsize=(10, 5))
+    colors = ['yellow', 'green', 'lightgreen', 'darkgreen', 'blue']
+    plt.bar(vtab_tasks_solved_labels, align_scores, yerr=align_errors, color=colors, alpha=0.7)
+    plt.xlabel('Percentage of VTAB Tasks Solved (total=19)')
+    plt.ylabel('Intra-bucket Alignment')
+    plt.title('Convergence to General Competence')
+    plt.show()
+
+    high_dim_feats = np.random.rand(5, 128)
+    model_types = ['Classification', 'MAE', 'Random Initialization', 'Contrastive', 'CLIP']
+    markers = ['o', 's', '^', '*', 'D']
+    vtab_tasks_solved = [3, 6, 9, 15, 19]
+    # plot_umap_figure(high_dim_feats, model_types, vtab_tasks_solved, markers)
+    umap_reducer = umap.UMAP()
+    umap_embeds = umap_reducer.fit_transform(high_dim_feats)
+
+    plt.figure(figsize=(8, 6))
+    for i, model_type in enumerate(model_types):
+        plt.scatter(umap_embeds[i, 0], umap_embeds[i, 1], c=[vtab_tasks_solved[i]],
+                    cmap='coolwarm', s=100, alpha=0.8, label=model_type, marker=markers[i])
+
+    plt.colorbar(label='VTAB Tasks Solved')
+    plt.title('UMAP of Model Representations')
+    plt.legend(title="Model Types")
+    plt.show()
 
 
 def get_args():
@@ -378,10 +409,12 @@ if __name__ == "__main__":
             args.layer_idx_left = i
             args.layer_idx_right = j
             align_metrics = AlignmentMetrics(metric=args.metric, rep_left=llm_rep[:, args.layer_idx_left], rep_right=lvm_rep[:, args.layer_idx_right], topk=5)
-            score = align_metrics.compute_score()
-            print(i, j, score)
+            align_score = align_metrics.compute_score()
+            print(i, j, align_score)
     # layer_rep_left = llm_rep[:, args.layer_idx_left]
     # layer_rep_right = lvm_rep[:, args.layer_idx_right]
     # align_metrics = AlignmentMetrics(metric=args.metric, rep_left=layer_rep_left, rep_right=layer_rep_right, topk=5)
     # score = align_metrics.compute_score()
     # print(score)
+
+    plot()
