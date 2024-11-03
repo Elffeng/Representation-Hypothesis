@@ -2,6 +2,8 @@ import os
 import torch
 import math
 
+from datasets import load_dataset, Dataset
+
 
 # def to_feature_filename(output_dir, dataset, subset, model_name, pool=None, prompt=None, caption_idx=None):
 #     save_name = f"{model_name.replace('/', '_')}"
@@ -20,22 +22,17 @@ import math
 #         f"{save_name}.pt"
 #     )
 #     return save_path
-def to_feature_filename(output_dir, dataset, subset, model_name, pool=None, prompt=None, caption_idx=None, language=None):
+def to_feature_filename(output_dir, dataset, model_name, pool=None, language=None):
     save_name = f"{model_name.replace('/', '_')}"
 
     if pool:
         save_name += f"_pool-{pool}"
-    if prompt:
-        save_name += f"_prompt-{prompt}"
-    if caption_idx:
-        save_name += f"_cid-{caption_idx}"
     if language:
         save_name += f"_lang-{language}"  # 添加语言标识符
     
     save_path = os.path.join(
         output_dir, 
-        dataset, 
-        subset,
+        dataset,
         f"{save_name}.pt"
     )
     return save_path
@@ -93,3 +90,38 @@ def cross_entropy_to_bits_per_unit(losses, input_strings, unit="byte"):
     # mormalize by the total number of bytes per input string
     bits_per_byte = losses_in_bits / bytes_per_input
     return bits_per_byte
+
+
+def load_wit_1024(args, modal='text', lang='en'):
+    dataset = load_dataset("minhuh/prh", revision=args.subset, split='train', cache_dir='../datasets/wit_1024')
+    # dataset = load_dataset("minhuh/prh", revision=args.subset, cache_dir='../datasets/wit_1024')
+    dataset = dataset.select(range(50))
+    if modal == 'text':
+        texts = [str(x['text'][0]) for x in dataset]  # a list of caption
+        return texts
+    elif modal == 'image':
+        images = [x['image'] for x in dataset]
+        return images
+
+
+def load_multi30k(args, modal='text', lang='en'):
+    dataset = load_dataset("romrawinjp/multi30k", split='test', cache_dir='../datasets/multi30k')
+    dataset = dataset.select(range(50))
+    if modal == 'text':
+        texts = [str(x[f'{lang}']) for x in dataset]
+        return texts
+    elif modal == 'image':
+        images = [x['image'] for x in dataset]
+        return images
+
+
+def load_flowers102(modal, lang='en'):
+    dataset = load_dataset("dpdl-benchmark/oxford_flowers102", streaming=True, split='train', cache_dir='../datasets/flowers102').take(50)
+    dataset = list(dataset)
+    dataset = Dataset.from_list(dataset)
+    if modal == 'text':
+        texts = [str(x['label']) for x in dataset]
+        return texts
+    elif modal == 'image':
+        images = [x['image'] for x in dataset]
+        return images

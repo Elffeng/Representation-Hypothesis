@@ -519,8 +519,15 @@ def get_args():
 
 if __name__ == "__main__":
     args = get_args()
-    llm_rep = load_rep(r_file="../results/features\minhuh\prh\wit_1024/bigscience_bloomz-560m_pool-avg.pt")
-    lvm_rep = load_rep(r_file="../results/features\minhuh\prh\wit_1024/vit_tiny_patch16_224.augreg_in21k_pool-cls.pt")
+    # llm_rep = load_rep(r_file="../results/features\minhuh\prh\wit_1024/bigscience_bloomz-560m_pool-avg.pt")
+    # lvm_rep = load_rep(r_file="../results/features\minhuh\prh\wit_1024/vit_tiny_patch16_224.augreg_in21k_pool-cls.pt")
+
+    # llm_rep = load_rep(r_file="../results/features/multi30k/bigscience_bloomz-560m_pool-avg.pt")
+    # lvm_rep = load_rep(r_file="../results/features/multi30k/vit_tiny_patch16_224.augreg_in21k_pool-cls.pt")
+
+    llm_rep = load_rep(r_file="../results/features/flowers102/bigscience_bloomz-560m_pool-avg.pt")
+    lvm_rep = load_rep(r_file="../results/features/flowers102/vit_tiny_patch16_224.augreg_in21k_pool-cls.pt")
+
     left_model_layers = llm_rep.shape[1]
     right_model_layers = lvm_rep.shape[1]
 
