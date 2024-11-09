@@ -10,15 +10,16 @@ import metrics
 import utils
 
 
-def extract_and_save_llm_rep(args, texts, llm_model, tokenizer, ):
-    llm_feats, losses, bpb_losses = [], [], []
-    for text in texts:
+def extract_and_save_llm_rep(args, texts_en, texts_de, llm_model, tokenizer):
+    llm_feats_en, llm_feats_de = [], []
+    for text in texts_en:
         inputs = tokenizer(text, padding="longest", return_tensors="pt")
         input_ids = inputs["input_ids"]
-        mask = inputs["attention_mask"].unsqueeze(-1).unsqueeze(1)  # (batch_size, 1, seq_len, 1)
+        mask = inputs["attention_mask"].unsqueeze(-1).unsqueeze(1)
+
         with torch.no_grad():
-            llm_output = llm_model(input_ids=input_ids, )
-            all_hidden_states = llm_output["hidden_states"]  # (num_layers, batch_size, seq_len, hidden_dim)
+            llm_output = llm_model(input_ids=input_ids)
+            all_hidden_states = llm_output["hidden_states"]
             if args.pool == 'avg':
                 feats = torch.stack(all_hidden_states).permute(1, 0, 2, 3)
                 feats = (feats * mask).sum(2) / mask.sum(2)
@@ -27,26 +28,47 @@ def extract_and_save_llm_rep(args, texts, llm_model, tokenizer, ):
                 feats = torch.stack(feats).permute(1, 0, 2)
             else:
                 raise NotImplementedError(f"unknown pooling {args.pool}")
-            llm_feats.append(feats.cpu())
-            # loss, avg_loss = utils.cross_entropy_loss(token_inputs, llm_output)
-            # losses.extend(avg_loss.cpu())
-            #
-            # bpb = utils.cross_entropy_to_bits_per_unit(loss.cpu(), texts[i:i + args.batch_size], unit="byte")
-            # bpb_losses.extend(bpb)
-        # print(f"average loss:\t{torch.stack(losses).mean().item()}")
-    save_dict = {
-        "feats": torch.cat(llm_feats),
-        # "num_params": llm_param_count,
-        # "mask": tokens["attention_mask"],
-        # "loss": torch.stack(losses).mean(),
-        # "bpb": torch.stack(bpb_losses).mean(),
-    }
-    save_path = utils.to_feature_filename(
-        args.output_dir, args.dataset, args.llm_model_name,
-        pool=args.pool,
-    )
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    torch.save(save_dict, save_path)
+            llm_feats_en.append(feats.cpu())
+
+    for text in texts_de:
+        inputs = tokenizer(text, padding="longest", return_tensors="pt")
+        input_ids = inputs["input_ids"]
+        mask = inputs["attention_mask"].unsqueeze(-1).unsqueeze(1)
+
+        with torch.no_grad():
+            llm_output = llm_model(input_ids=input_ids)
+            all_hidden_states = llm_output["hidden_states"]
+            if args.pool == 'avg':
+                feats = torch.stack(all_hidden_states).permute(1, 0, 2, 3)
+                feats = (feats * mask).sum(2) / mask.sum(2)
+            elif args.pool == 'last':
+                feats = [v[:, -1, :] for v in all_hidden_states]
+                feats = torch.stack(feats).permute(1, 0, 2)
+            else:
+                raise NotImplementedError(f"unknown pooling {args.pool}")
+            llm_feats_de.append(feats.cpu())
+
+    save_dict_en = {
+    "feats_en": torch.cat(llm_feats_en),
+}
+
+    save_path_en = utils.to_feature_filename(
+    args.output_dir, args.dataset, args.subset, args.llm_model_name,
+    pool=args.pool, caption_idx=args.caption_idx, language="en"
+)
+    os.makedirs(os.path.dirname(save_path_en), exist_ok=True)
+    torch.save(save_dict_en, save_path_en)
+
+    save_dict_de = {
+    "feats_de": torch.cat(llm_feats_de),
+}
+    save_path_de = utils.to_feature_filename(
+    args.output_dir, args.dataset, args.subset, args.llm_model_name,
+    pool=args.pool, caption_idx=args.caption_idx, language="de"
+)
+    os.makedirs(os.path.dirname(save_path_de), exist_ok=True)
+    torch.save(save_dict_de, save_path_de)
+
 
 
 def check_bfloat16_support():
@@ -121,15 +143,17 @@ def load_tokenizer(llm_model_name):
     return tokenizer
 
 
+
+
+
 def load_text(args):
-    from utils import load_wit_1024, load_multi30k, load_flowers102
-    if args.dataset == "wit_1024":
-        texts = load_wit_1024(args, modal='text', lang='en')
-    elif args.dataset == "multi30k":
-        texts = load_multi30k(args, modal='text', lang='en')
-    elif args.dataset == "flowers102":
-        texts = load_flowers102(modal='text', lang='en')
-    return texts
+    dataset = load_dataset(args.dataset, split='train', cache_dir='./wit_1024')
+    # dataset = dataset.select(range(12))
+    dataset = dataset.select(range(50))
+    english_texts = [str(x['en']) for x in dataset]
+    german_texts = [str(x['de']) for x in dataset]
+    # texts = [str(x['text'][args.caption_idx]) for x in dataset]
+    return english_texts, german_texts
 
 
 def load_model(args):
@@ -137,6 +161,7 @@ def load_model(args):
     llm_param_count = sum([p.numel() for p in language_model.parameters()])
     tokenizer = load_tokenizer(llm_model_name=args.llm_model_name)
     return language_model, tokenizer
+
 
 
 def load_representation(save_path, q=0.95, exact=False):
@@ -156,16 +181,15 @@ def get_args():
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--pool", type=str, default='avg', choices=['avg', 'cls'])
     # parser.add_argument("--prompt", action="store_true")
-    parser.add_argument("--dataset", type=str, default="flowers102", choices=['wit_1024', 'multi30k', 'flowers102'])
-    # parser.add_argument("--dataset", type=str, default="minhuh/prh", choices=['wit_1024'])
-    # parser.add_argument("--subset", type=str, default="wit_1024")
-    # parser.add_argument("--caption_idx", type=int, default=0)
-    # parser.add_argument("--modelset", type=str, default="val", choices=["val", "test"])
+    parser.add_argument("--dataset", type=str, default="minhuh/prh")
+    parser.add_argument("--subset", type=str, default="wit_1024")
+    parser.add_argument("--caption_idx", type=int, default=0)
+    parser.add_argument("--modelset", type=str, default="val", choices=["val", "test"])
     parser.add_argument("--llm_model_name", type=str, default="bigscience/bloomz-560m", choices=["val", "test"])
-    # parser.add_argument("--modality", type=str, default="language", choices=["vision", "language", "all"])
-    parser.add_argument("--output_dir", type=str, default="../results/features")
+    parser.add_argument("--modality", type=str, default="language", choices=["vision", "language", "all"])
+    parser.add_argument("--output_dir", type=str, default="./results/features")
     parser.add_argument("--qlora", action="store_true")
-
+    
     # 可以选择语言
     parser.add_argument("--language", type=str, default="en", choices=["en", "de"])
 
@@ -176,9 +200,10 @@ def get_args():
     return args
 
 
-if __name__ == "__main__":
+if __name__=="__main__":
     args = get_args()
-    texts = load_text(args)
+    texts_en, texts_de = load_text(args)
     llm_model, tokenizer = load_model(args)
-    extract_and_save_llm_rep(args=args, llm_model=llm_model, tokenizer=tokenizer, texts=texts)
-    # load_representation("/Users/fengdan/Desktop/essay/platonic-rep-main/results/features/minhuh/prh/wit_1024/vit_tiny_patch16_224.augreg_in21k_pool-cls.pt")
+    extract_and_save_llm_rep(args=args, texts_en=texts_en, texts_de=texts_de, llm_model=llm_model, tokenizer=tokenizer)
+    # load_representation("D:\phd6\parttime/representation convergence\Representation-Hypothesis/results/features\minhuh\prh\wit_1024/bigscience_bloomz-560m_pool-avg.pt")
+    load_representation("/Users/fengdan/Desktop/essay/platonic-rep-main/results/features/minhuh/prh/wit_1024/vit_tiny_patch16_224.augreg_in21k_pool-cls.pt")
