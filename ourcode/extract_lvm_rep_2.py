@@ -14,7 +14,7 @@ import metrics
 import utils
 
 
-def extract_and_save_lvm_rep(args, images, lvm_model, tokenizer, ):
+def extract_and_save_lvm_rep(args, images, lvm_model, tokenizer,):
     if "vit" in args.lvm_model_name:
         return_nodes = [f"blocks.{i}.add_1" for i in range(len(lvm_model.blocks))]
     else:
@@ -37,11 +37,14 @@ def extract_and_save_lvm_rep(args, images, lvm_model, tokenizer, ):
         "feats": torch.cat(lvm_feats),
     }
     save_path = utils.to_feature_filename(
-        args.output_dir, args.dataset, args.lvm_model_name,
-        pool=args.pool,
+            output_dir=args.output_dir, dataset=args.dataset, subset=args.subset, 
+            model_name=args.lvm_model_name, pool=args.pool, caption_idx=args.caption_idx, 
+            num_samples=args.num_samples, batch_size=args.batch_size
     )
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     torch.save(save_dict, save_path)
+
+
 
 
 def check_bfloat16_support():
@@ -91,17 +94,17 @@ def load_tokenizer(llm_model_name):
 
 
 def load_images(args):
-    from utils import load_wit_1024, load_multi30k, load_flowers102
-    if args.dataset == "wit_1024":
-        images = load_wit_1024(args, modal='image')
-    elif args.dataset == "multi30k":
-        images = load_multi30k(args, modal='image')
-    elif args.dataset == "flowers102":
-        images = load_flowers102(modal='image')
+    dataset = load_dataset(args.dataset,split='train', cache_dir='./wit_1024')
+    dataset = dataset.select(range(50))
+    images = [x['image'] for x in dataset]
     return images
 
 
+
 def load_representation(save_path, q=0.95, exact=False):
+    """
+        准备特征，通过去除异常值和标准化特征
+    """
     hidden_states = torch.load(save_path)
     # feats = metrics.remove_outliers(hidden_states.float(), q=q, exact=exact)
     return hidden_states
@@ -114,10 +117,14 @@ def get_args():
     parser.add_argument("--num_samples", type=int, default=1024)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--pool", type=str, default='cls', choices=['cls'])
-    parser.add_argument("--dataset", type=str, default="flowers102", choices=['wit_1024', 'multi30k', 'flowers102'])
-    parser.add_argument("--lvm_model_name", type=str, default="vit_tiny_patch16_224.augreg_in21k",
-                        choices=[""])
-    parser.add_argument("--output_dir", type=str, default="../results/features")
+    # parser.add_argument("--prompt", action="store_true")
+    parser.add_argument("--dataset", type=str, default="minhuh/prh")
+    parser.add_argument("--subset", type=str, default="wit_1024")
+    parser.add_argument("--caption_idx", type=int, default=0)
+    parser.add_argument("--modelset", type=str, default="val", choices=["val", "test"])
+    parser.add_argument("--lvm_model_name", type=str, default="vit_tiny_patch16_224.augreg_in21k", choices=["val", "test"])
+    parser.add_argument("--modality", type=str, default="vision", choices=["vision", "language", "all"])
+    parser.add_argument("--output_dir", type=str, default="./results/features/")
     parser.add_argument("--qlora", action="store_true")
     args = parser.parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -126,11 +133,10 @@ def get_args():
     return args
 
 
-if __name__ == "__main__":
+if __name__=="__main__":
     args = get_args()
     images = load_images(args)
     lvm_model, transform = load_model(args.lvm_model_name)
     extract_and_save_lvm_rep(args=args, images=images, lvm_model=lvm_model, tokenizer=transform)
     # load_representation("./results/features\minhuh\prh\wit_1024/bigscience_bloomz-560m_pool-avg.pt")
-    # load_representation(
-    #     "/Users/fengdan/Desktop/essay/platonic-rep-main/results/features/minhuh/prh/wit_1024/vit_tiny_patch16_224.augreg_in21k_pool-cls.pt")
+    load_representation("/Users/fengdan/Desktop/essay/platonic-rep-main/results/features/minhuh/prh/wit_1024/vit_tiny_patch16_224.augreg_in21k_pool-cls.pt")
