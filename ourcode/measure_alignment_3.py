@@ -1,4 +1,5 @@
 import argparse
+import os
 from collections import defaultdict
 
 import numpy as np
@@ -18,10 +19,6 @@ def load_rep(r_file):
 
 
 class AlignmentMetrics:
-    SUPPORTED_METRICS = [
-
-    ]
-
     def __init__(self, metric, rep_left, rep_right, topk):
         self.metric = metric
         self.rep_left = rep_left
@@ -372,7 +369,21 @@ def visualization():
     plt.show()
 
 
-def visualize_different_layers(alignment_scores):
+def visualize_different_layers(llm_rep, lvm_rep):
+    # # 可视化1
+    left_model_layers = llm_rep.shape[1]
+    right_model_layers = lvm_rep.shape[1]
+    alignment_scores = np.zeros((left_model_layers, right_model_layers))
+    if args.layer_mode == 'all':
+        for i in range(left_model_layers):
+            for j in range(right_model_layers):
+                args.layer_idx_left = i
+                args.layer_idx_right = j
+                align_metrics = AlignmentMetrics(metric=args.metric, rep_left=llm_rep[:, args.layer_idx_left],
+                                                 rep_right=lvm_rep[:, args.layer_idx_right], topk=5)
+                align_score = align_metrics.compute_score()
+                alignment_scores[i, j] = align_score
+                print(i, j, align_score)
     # 创建图形
     plt.figure(figsize=(8, 6))
 
@@ -398,38 +409,22 @@ def visualize_different_layers(alignment_scores):
     plt.show()
 
 
-def visualize_different_metrics(alignment_scores):
-    # 创建折线图
-    plt.figure(figsize=(12, 6))
+def visualize_inner_layers(representation):
+    model_layers = representation.shape[1]
+    # 可视化3: 两个模型的不同层的alignment score
+    alignment_scores = np.zeros(model_layers)
+    for i in range(model_layers):
+        align_metrics = AlignmentMetrics(metric=args.metric, rep_left=llm_rep[:, i],
+                                         rep_right=llm_rep[:, -1], topk=5)
+        align_score = align_metrics.compute_score()
+        alignment_scores[i] = align_score
+        print(i, align_score)
 
-    # 绘制折线图
-    plt.plot(metrics, alignment_scores, marker='o', linewidth=2, markersize=8)
-
-    # 添加标签和标题
-    plt.title('Alignment Scores across Different Metrics')
-    plt.xlabel('Metrics')
-    plt.ylabel('Alignment Score')
-
-    # 旋转x轴标签以防止重叠
-    plt.xticks(rotation=45, ha='right')
-
-    # 添加网格线以提高可读性
-    plt.grid(True, linestyle='--', alpha=0.7)
-
-    # 调整布局以确保所有元素可见
-    plt.tight_layout()
-    plt.savefig('../results/figures/alignment_metric_scores.png')
-
-    # 显示热力图
-    plt.show()
-
-
-def visualize_inner_layers(alignment_scores, layer_num):
     # 创建图形
     plt.figure(figsize=(10, 6))
 
     # 创建x轴的值（将层索引转换为比例）
-    x = np.array(range(layer_num)) / (layer_num - 1)
+    x = np.array(range(model_layers)) / (model_layers - 1)
     y = alignment_scores
 
     # 绘制散点图
@@ -461,7 +456,62 @@ def visualize_inner_layers(alignment_scores, layer_num):
     plt.show()
 
 
-def visualization_metrics_correlation(align_metric_score):
+def visualize_different_metrics(llm_rep, lvm_rep):
+    metrics = ["cycle_knn", "mutual_knn",
+               "cka", "unbiased_cka", "cknna", "svcca",
+               "cknna"]  # , "lcs_knn" "edit_distance_knn"
+    scores = []
+    for metric in metrics:
+        align_metrics = AlignmentMetrics(metric=metric, rep_left=llm_rep[:, -1],
+                                         rep_right=lvm_rep[:, -1], topk=5)
+        align_score = align_metrics.compute_score()
+        scores.append(align_score)
+        print('last', metric, align_score)
+    # 创建折线图
+    plt.figure(figsize=(12, 6))
+
+    # 绘制折线图
+    plt.plot(metrics, scores, marker='o', linewidth=2, markersize=8)
+
+    # 添加标签和标题
+    plt.title('Alignment Scores across Different Metrics')
+    plt.xlabel('Metrics')
+    plt.ylabel('Alignment Score')
+
+    # 旋转x轴标签以防止重叠
+    plt.xticks(rotation=45, ha='right')
+
+    # 添加网格线以提高可读性
+    plt.grid(True, linestyle='--', alpha=0.7)
+
+    # 调整布局以确保所有元素可见
+    plt.tight_layout()
+    plt.savefig('../results/figures/alignment_metric_scores.png')
+
+    # 显示热力图
+    plt.show()
+
+
+def visualization_metrics_correlation(llm_rep, lvm_rep):
+    left_model_layers = llm_rep.shape[1]
+    right_model_layers = lvm_rep.shape[1]
+    # 可视化4: 评估指标相关性，敏感性等
+    metrics = ["cycle_knn", "mutual_knn",
+               "cka", "unbiased_cka", "cknna", "svcca",
+               "cknna"]
+    align_metric_score = defaultdict(list)
+    for metric in metrics:
+        scores = []
+        for i in range(left_model_layers):
+            for j in range(right_model_layers):
+                align_metrics = AlignmentMetrics(metric=metric, rep_left=llm_rep[:, i],
+                                                 rep_right=lvm_rep[:, j], topk=5)
+                align_score = align_metrics.compute_score()
+                scores.append(align_score)
+        scores = np.array(scores)
+        normalized_score = (scores - scores.min()) / (scores.max() - scores.min())
+        align_metric_score[metric] = normalized_score
+
     scores_df = pd.DataFrame(align_metric_score)
     correlation_matrices = {
         # 'pearson': scores_df.corr(method='pearson'),
@@ -507,8 +557,8 @@ def get_args():
     parser.add_argument("--left_model_name", type=str, default="bigscience/bloomz-560m", choices=["val", "test"])
     parser.add_argument("--right_model_name", type=str, default="bigscience/bloomz-560m", choices=["val", "test"])
     # parser.add_argument("--modality", type=str, default="language", choices=["vision", "language", "all"])
-    parser.add_argument("--output_dir", type=str, default="./results/features")
-    parser.add_argument("--layer_mode", type=str, default="last", choices=["all", "last"])
+    parser.add_argument("--feature_dir", type=str, default="../results/features")
+    parser.add_argument("--layer_mode", type=str, default="all", choices=["all", "last"])
     # parser.add_argument("--qlora", action="store_true")
     args = parser.parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -519,6 +569,8 @@ def get_args():
 
 if __name__ == "__main__":
     args = get_args()
+    r_llm_file = os.path.join(args.feature_dir, args.dataset, args.subset,
+                              args.left_model_name.replace('/', '_') + '_' + '-avg.pt')
     # llm_rep = load_rep(r_file="../results/features\minhuh\prh\wit_1024/bigscience_bloomz-560m_pool-avg.pt")
     # lvm_rep = load_rep(r_file="../results/features\minhuh\prh\wit_1024/vit_tiny_patch16_224.augreg_in21k_pool-cls.pt")
 
@@ -528,119 +580,16 @@ if __name__ == "__main__":
     llm_rep = load_rep(r_file="../results/features/flowers102/bigscience_bloomz-560m_pool-avg.pt")
     lvm_rep = load_rep(r_file="../results/features/flowers102/vit_tiny_patch16_224.augreg_in21k_pool-cls.pt")
 
-    left_model_layers = llm_rep.shape[1]
-    right_model_layers = lvm_rep.shape[1]
+    # left_model_layers = llm_rep.shape[1]
+    # right_model_layers = lvm_rep.shape[1]
 
     print(f'Tested model: {args.left_model_name}, {args.right_model_name}, metric: {args.metric}')
 
-    # # 可视化1
-    alignment_scores = np.zeros((left_model_layers, right_model_layers))
-    # if args.layer_mode == 'all':
-    #     for i in range(left_model_layers):
-    #         for j in range(right_model_layers):
-    #             args.layer_idx_left = i
-    #             args.layer_idx_right = j
-    #             align_metrics = AlignmentMetrics(metric=args.metric, rep_left=llm_rep[:, args.layer_idx_left],
-    #                                              rep_right=lvm_rep[:, args.layer_idx_right], topk=5)
-    #             align_score = align_metrics.compute_score()
-    #             alignment_scores[i, j] = align_score
-    #             print(i, j, align_score)
-    #     visualize_different_layers(alignment_scores)
-    # # 可视化2
-    # elif args.layer_mode == 'last':
-    #     metrics = ["cycle_knn", "mutual_knn",
-    #                "cka", "unbiased_cka", "cknna", "svcca",
-    #                 "cknna"] # , "lcs_knn" "edit_distance_knn"
-    #     scores = []
-    #     for metric in metrics:
-    #         align_metrics = AlignmentMetrics(metric=metric, rep_left=llm_rep[:, -1],
-    #                                          rep_right=lvm_rep[:, -1], topk=5)
-    #         align_score = align_metrics.compute_score()
-    #         scores.append(align_score)
-    #         print('last', metric, align_score)
-    #     visualize_different_metrics(scores)
+    visualize_different_layers(llm_rep, lvm_rep)
 
-    # 可视化3: 两个模型的不同层的alignment score
-    # alignment_scores = np.zeros(left_model_layers)
-    # for i in range(left_model_layers):
-    #     align_metrics = AlignmentMetrics(metric=args.metric, rep_left=llm_rep[:, i],
-    #                                      rep_right=llm_rep[:, -1], topk=5)
-    #     align_score = align_metrics.compute_score()
-    #     alignment_scores[i] = align_score
-    #     print(i, align_score)
-    # visualize_inner_layers(alignment_scores, left_model_layers)
-    #
-    # alignment_scores = np.zeros(right_model_layers)
-    # for j in range(right_model_layers):
-    #     align_metrics = AlignmentMetrics(metric=args.metric, rep_left=lvm_rep[:, j],
-    #                                      rep_right=lvm_rep[:, -1], topk=5)
-    #     align_score = align_metrics.compute_score()
-    #     alignment_scores[j] = align_score
-    #     print(j, align_score)
-    # visualize_inner_layers(alignment_scores, right_model_layers)
+    visualize_inner_layers(llm_rep)
+    visualize_inner_layers(lvm_rep)
 
+    visualize_different_metrics(llm_rep, lvm_rep)
 
-
-    # 可视化4: 评估指标相关性，敏感性等
-    metrics = ["cycle_knn", "mutual_knn",
-                   "cka", "unbiased_cka", "cknna", "svcca",
-                    "cknna"]
-    align_metric_score = defaultdict(list)
-    for metric in metrics:
-        scores = []
-        for i in range(left_model_layers):
-            for j in range(right_model_layers):
-                align_metrics = AlignmentMetrics(metric=metric, rep_left=llm_rep[:, i],
-                                                 rep_right=lvm_rep[:, j], topk=5)
-                align_score = align_metrics.compute_score()
-                scores.append(align_score)
-        scores = np.array(scores)
-        normalized_score = (scores - scores.min()) / (scores.max() - scores.min())
-        align_metric_score[metric] = normalized_score
-    # visualization_metrics_correlation(align_metric_score)
-
-    # 可视化5： 指标聚类分析
-    scores_df = pd.DataFrame(align_metric_score)
-    correlation_matrices = {
-        # 'pearson': scores_df.corr(method='pearson'),
-        'spearman': scores_df.corr(method='spearman'),
-        # 'kendall': scores_df.corr(method='kendall')
-    }
-    clustered_metrics = {
-        'high_correlation': [],  # |r| > 0.8
-        'moderate_correlation': [],  # 0.5 < |r| <= 0.8
-        'low_correlation': []  # |r| <= 0.5
-    }
-
-    spearman_corr = correlation_matrices['spearman']
-    n_metrics = len(spearman_corr)
-    processed_pairs = set()
-
-    for i in range(n_metrics):
-        for j in range(i + 1, n_metrics):
-            if (i, j) not in processed_pairs:
-                corr = abs(spearman_corr.iloc[i, j])
-                pair = (spearman_corr.index[i], spearman_corr.columns[j])
-
-                if corr > 0.8:
-                    clustered_metrics['high_correlation'].append((pair, corr))
-                elif corr > 0.5:
-                    clustered_metrics['moderate_correlation'].append((pair, corr))
-                else:
-                    clustered_metrics['low_correlation'].append((pair, corr))
-
-                processed_pairs.add((i, j))
-                processed_pairs.add((j, i))
-    print("==== 指标相关性分析结果 ====\n")
-
-    print("高度相关的指标对 (|r| > 0.8):")
-    for pair, corr in sorted(clustered_metrics['high_correlation'], key=lambda x: -x[1]):
-        print(f"  {pair[0]} - {pair[1]}: {corr:.3f}")
-
-    print("\n中度相关的指标对 (0.5 < |r| <= 0.8):")
-    for pair, corr in sorted(clustered_metrics['moderate_correlation'], key=lambda x: -x[1]):
-        print(f"  {pair[0]} - {pair[1]}: {corr:.3f}")
-
-    print("\n低度相关的指标对 (|r| <= 0.5):")
-    for pair, corr in sorted(clustered_metrics['low_correlation'], key=lambda x: -x[1]):
-        print(f"  {pair[0]} - {pair[1]}: {corr:.3f}")
+    visualization_metrics_correlation(llm_rep, lvm_rep)

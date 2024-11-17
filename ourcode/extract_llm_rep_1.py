@@ -181,4 +181,3 @@ if __name__ == "__main__":
     texts = load_text(args)
     llm_model, tokenizer = load_model(args)
     extract_and_save_llm_rep(args=args, llm_model=llm_model, tokenizer=tokenizer, texts=texts)
-    # load_representation("/Users/fengdan/Desktop/essay/platonic-rep-main/results/features/minhuh/prh/wit_1024/vit_tiny_patch16_224.augreg_in21k_pool-cls.pt")
