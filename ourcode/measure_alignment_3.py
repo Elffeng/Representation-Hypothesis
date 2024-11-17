@@ -456,42 +456,6 @@ def visualize_inner_layers(representation):
     plt.show()
 
 
-def visualize_different_metrics(llm_rep, lvm_rep):
-    metrics = ["cycle_knn", "mutual_knn",
-               "cka", "unbiased_cka", "cknna", "svcca",
-               "cknna"]  # , "lcs_knn" "edit_distance_knn"
-    scores = []
-    for metric in metrics:
-        align_metrics = AlignmentMetrics(metric=metric, rep_left=llm_rep[:, -1],
-                                         rep_right=lvm_rep[:, -1], topk=5)
-        align_score = align_metrics.compute_score()
-        scores.append(align_score)
-        print('last', metric, align_score)
-    # 创建折线图
-    plt.figure(figsize=(12, 6))
-
-    # 绘制折线图
-    plt.plot(metrics, scores, marker='o', linewidth=2, markersize=8)
-
-    # 添加标签和标题
-    plt.title('Alignment Scores across Different Metrics')
-    plt.xlabel('Metrics')
-    plt.ylabel('Alignment Score')
-
-    # 旋转x轴标签以防止重叠
-    plt.xticks(rotation=45, ha='right')
-
-    # 添加网格线以提高可读性
-    plt.grid(True, linestyle='--', alpha=0.7)
-
-    # 调整布局以确保所有元素可见
-    plt.tight_layout()
-    plt.savefig('../results/figures/alignment_metric_scores.png')
-
-    # 显示热力图
-    plt.show()
-
-
 def visualization_metrics_correlation(llm_rep, lvm_rep):
     left_model_layers = llm_rep.shape[1]
     right_model_layers = lvm_rep.shape[1]
@@ -589,7 +553,5 @@ if __name__ == "__main__":
 
     visualize_inner_layers(llm_rep)
     visualize_inner_layers(lvm_rep)
-
-    visualize_different_metrics(llm_rep, lvm_rep)
 
     visualization_metrics_correlation(llm_rep, lvm_rep)
