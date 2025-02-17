@@ -1,17 +1,5 @@
-import argparse
-import os
-from collections import defaultdict
-
-import numpy as np
-import pandas as pd
-import seaborn as sns
 import torch
 import torch.nn.functional as F
-import umap.umap_ as umap
-from matplotlib import pyplot as plt
-from sklearn.cross_decomposition import CCA
-import torchaudio.functional as TAF
-
 
 
 # 修改原有的AlignmentMetrics类，添加新的对齐方法
